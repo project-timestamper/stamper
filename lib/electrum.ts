@@ -37,8 +37,12 @@ export type HeaderBatch = {
 };
 
 const rpcErrorMessage = (error: unknown): string => {
-  if (typeof error === "string") return error;
-  if (isRecord(error) && typeof error.message === "string") return error.message;
+  if (typeof error === "string") {
+    return error;
+  }
+  if (isRecord(error) && typeof error.message === "string") {
+    return error.message;
+  }
   return JSON.stringify(error);
 };
 
@@ -51,7 +55,9 @@ const parseRpcEnvelope = (
   } catch {
     return null;
   }
-  if (!isRecord(parsed) || typeof parsed.id !== "number") return null;
+  if (!isRecord(parsed) || typeof parsed.id !== "number") {
+    return null;
+  }
   return {
     id: parsed.id,
     error: parsed.error,
@@ -115,7 +121,9 @@ export class ElectrumClient {
   }
 
   connect(): Promise<void> {
-    if (this.socket) return Promise.resolve();
+    if (this.socket) {
+      return Promise.resolve();
+    }
     return new Promise((resolve, reject) => {
       const socket = tls.connect({
         host: this.host,
@@ -232,7 +240,9 @@ export class ElectrumClient {
   }
 
   private failAll(err: Error): void {
-    for (const waiter of this.pending.values()) waiter.reject(err);
+    for (const waiter of this.pending.values()) {
+      waiter.reject(err);
+    }
     this.pending.clear();
   }
 }

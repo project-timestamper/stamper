@@ -56,9 +56,13 @@ export const hashToId = (hashLe: Buffer): string =>
   Buffer.from(hashLe).reverse().toString("hex");
 
 export const targetToCompact = (target: bigint): number => {
-  if (target === 0n) return 0;
+  if (target === 0n) {
+    return 0;
+  }
   let hex = target.toString(16);
-  if (hex.length % 2) hex = `0${hex}`;
+  if (hex.length % 2) {
+    hex = `0${hex}`;
+  }
   let size = hex.length / 2;
   let compact: number;
   if (size <= 3) {
@@ -98,11 +102,17 @@ const retargetBits = (first: BlockHeader, last: BlockHeader): number => {
   let timespan = last.time - first.time;
   const min = Math.floor(TARGET_TIMESPAN / 4);
   const max = TARGET_TIMESPAN * 4;
-  if (timespan < min) timespan = min;
-  if (timespan > max) timespan = max;
+  if (timespan < min) {
+    timespan = min;
+  }
+  if (timespan > max) {
+    timespan = max;
+  }
   let next =
     (compactToTarget(first.bits) * BigInt(timespan)) / BigInt(TARGET_TIMESPAN);
-  if (next > MAX_TARGET) next = MAX_TARGET;
+  if (next > MAX_TARGET) {
+    next = MAX_TARGET;
+  }
   return targetToCompact(next);
 };
 
@@ -189,7 +199,9 @@ export class HeaderChain {
       const header = this.at(height);
       const prev = height > this.startHeight ? this.at(height - 1) : null;
       verifyHeader(header, height, prev, (h) => {
-        if (h < this.startHeight) return null;
+        if (h < this.startHeight) {
+          return null;
+        }
         return this.at(h);
       });
       if (height === CHECKPOINT.height && header.id !== CHECKPOINT.hash) {
@@ -206,13 +218,17 @@ export const headerAt = (
   height: number,
   startHeight = CHECKPOINT.height
 ): BlockHeader => {
-  if (chain instanceof HeaderChain) return chain.at(height);
+  if (chain instanceof HeaderChain) {
+    return chain.at(height);
+  }
   return new HeaderChain(chain, startHeight).at(height);
 };
 
 const headersFromRaw = (raw: Buffer, count: number): Buffer => {
   const got = Math.min(count, Math.floor(raw.length / HEADER_SIZE));
-  if (got <= 0) throw new Error("server returned no headers");
+  if (got <= 0) {
+    throw new Error("server returned no headers");
+  }
   return raw.subarray(0, got * HEADER_SIZE);
 };
 
@@ -367,7 +383,9 @@ export const verifyCheckpoint = async (
 
   for (let i = 1; i < clients.length; i++) {
     const peer = clients[i];
-    if (peer === undefined) continue;
+    if (peer === undefined) {
+      continue;
+    }
     try {
       const { raw } = await peer.getHeaders(CHECKPOINT.height, 1);
       const remote = parseHeader(raw, 0);
@@ -429,7 +447,9 @@ export const syncHeaders = async (
   }
 
   let have = chain.tipHeight + 1;
-  if (have < CHECKPOINT.height) have = CHECKPOINT.height;
+  if (have < CHECKPOINT.height) {
+    have = CHECKPOINT.height;
+  }
   if (have > targetHeight + 1) {
     const keep = (targetHeight - chain.startHeight + 1) * HEADER_SIZE;
     chain = new HeaderChain(
@@ -484,7 +504,9 @@ export const syncHeaders = async (
   ].filter((h, i, arr) => arr.indexOf(h) === i);
   for (let i = 1; i < tips.length; i++) {
     const peer = tips[i]?.client;
-    if (peer === undefined) continue;
+    if (peer === undefined) {
+      continue;
+    }
     for (const height of checkHeights) {
       try {
         const { raw } = await peer.getHeaders(height, 1);

@@ -86,15 +86,21 @@ const readVaruint = (cur: Cursor): number => {
   for (;;) {
     const b = readByte(cur);
     value += (b & 0x7f) * 2 ** shift;
-    if ((b & 0x80) === 0) return value;
+    if ((b & 0x80) === 0) {
+      return value;
+    }
     shift += 7;
-    if (shift > 63) throw new Error("varuint too large");
+    if (shift > 63) {
+      throw new Error("varuint too large");
+    }
   }
 };
 
 const readVarbytes = (cur: Cursor, max = 4096): Buffer => {
   const len = readVaruint(cur);
-  if (len > max) throw new Error(`varbytes too long: ${len}`);
+  if (len > max) {
+    throw new Error(`varbytes too long: ${len}`);
+  }
   return read(cur, len);
 };
 

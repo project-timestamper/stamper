@@ -41,7 +41,7 @@ const usage = (): void => {
 <hashlist>  Verify a Project Timestamper hash list file against <hashlist>.ots.
 
 <url>       Download a work (e.g. a WikiArt painting), SHA-256 it, find it in
-            ~/timestamper/docs/wikiart_works/\$PREFIX, then verify PREFIX.ots.
+            ~/timestamper/docs/wikiart_works/$PREFIX, then verify PREFIX.ots.
 
 checkpoint  Walk every header from genesis to the SPV checkpoint.
 `);
@@ -61,10 +61,14 @@ const parseArgs = (argv: string[]): CliArgs => {
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === undefined) continue;
+    if (a === undefined) {
+      continue;
+    }
     if (a === "--cache") {
       const dir = argv[i + 1];
-      if (dir === undefined) throw new Error("--cache requires a directory");
+      if (dir === undefined) {
+        throw new Error("--cache requires a directory");
+      }
       args.cache = dir;
       i += 1;
     } else if (a === "--collection") {
@@ -172,9 +176,13 @@ const main = async (): Promise<void> => {
     usage();
     process.exit(0);
   }
-  if (args.command === "checkpoint") await cmdCheckpoint();
-  else if (args.command === "work") await cmdWork(args);
-  else await cmdHashlist(args);
+  if (args.command === "checkpoint") {
+    await cmdCheckpoint();
+  } else if (args.command === "work") {
+    await cmdWork(args);
+  } else {
+    await cmdHashlist(args);
+  }
 };
 
 main().catch((err: unknown) => {

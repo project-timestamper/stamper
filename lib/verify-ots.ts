@@ -24,7 +24,9 @@ export const withClients = async <T>(
   try {
     return await fn(clients);
   } finally {
-    for (const client of clients) client.close();
+    for (const client of clients) {
+      client.close();
+    }
   }
 };
 
