@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { connectSome, DEFAULT_SERVERS, type ElectrumClient } from "./electrum.ts";
 import { CHECKPOINT, HeaderStore, syncHeaders } from "./headers.ts";
-import { hashFile, isBitcoinLeaf, isPendingLeaf, parseOts } from "./ots.ts";
+import { hashData, isBitcoinLeaf, isPendingLeaf, parseOts } from "./ots.ts";
 
 export type OtsVerifySuccess = {
   height: number;
@@ -30,26 +30,42 @@ export const withClients = async <T>(
   }
 };
 
-export const verifyDetachedOts = async ({
-  filePath,
-  otsPath = `${filePath}.ots`,
-  cacheDir,
-}: {
-  filePath: string;
-  otsPath?: string;
+type VerifyDetachedOtsArgs = {
   cacheDir: string;
-}): Promise<OtsVerifySuccess> => {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`missing file: ${filePath}`);
-  }
-  if (!fs.existsSync(otsPath)) {
-    throw new Error(`missing proof: ${otsPath}`);
+} & (
+  | { filePath: string; otsPath?: string }
+  | { fileBytes: Buffer; otsBytes: Buffer; label: string }
+);
+
+export const verifyDetachedOts = async (
+  args: VerifyDetachedOtsArgs
+): Promise<OtsVerifySuccess> => {
+  const { cacheDir } = args;
+  let fileData: Buffer;
+  let otsData: Buffer;
+  let label: string;
+  if ("fileBytes" in args) {
+    fileData = args.fileBytes;
+    otsData = args.otsBytes;
+    label = args.label;
+  } else {
+    const filePath = args.filePath;
+    const otsPath = args.otsPath ?? `${filePath}.ots`;
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`missing file: ${filePath}`);
+    }
+    if (!fs.existsSync(otsPath)) {
+      throw new Error(`missing proof: ${otsPath}`);
+    }
+    fileData = fs.readFileSync(filePath);
+    otsData = fs.readFileSync(otsPath);
+    label = path.basename(filePath);
   }
 
-  const ots = parseOts(fs.readFileSync(otsPath));
-  const fileDigest = hashFile(filePath, ots.hashName);
+  const ots = parseOts(otsData);
+  const fileDigest = hashData(fileData, ots.hashName);
   console.log(
-    `${ots.hashName}(${path.basename(filePath)}) = ${fileDigest.toString("hex")}`
+    `${ots.hashName}(${label}) = ${fileDigest.toString("hex")}`
   );
   console.log(`ots file digest                 = ${ots.fileDigest.toString("hex")}`);
   if (!fileDigest.equals(ots.fileDigest)) {

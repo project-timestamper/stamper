@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs";
 
 const MAGIC = Buffer.from(
   "\x00OpenTimestamps\x00\x00Proof\x00\xbf\x89\xe2\xe8\x84\xe8\x92\x94",
@@ -221,10 +220,8 @@ export const parseOts = (buf: Buffer): OtsProof => {
   };
 };
 
-export const hashFile = (filePath: string, hashName: FileHashName): Buffer => {
-  const data = fs.readFileSync(filePath);
-  return createHash(hashName).update(data).digest();
-};
+export const hashData = (data: Buffer, hashName: FileHashName): Buffer =>
+  createHash(hashName).update(data).digest();
 
 export const isBitcoinLeaf = (
   leaf: TimestampLeaf

@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyCheckpoint } from "./lib/headers.ts";
@@ -13,12 +11,8 @@ import {
 
 const HASH_BYTES = 32;
 const PREFIX_HEX_DIGITS = 2;
-const DEFAULT_COLLECTION = path.join(
-  os.homedir(),
-  "timestamper",
-  "docs",
-  "wikiart_works"
-);
+const PAGES_BASE = "https://project-timestamper.github.io/timestamper";
+const DEFAULT_COLLECTION = "wikiart_works";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,7 +20,7 @@ type Command = "checkpoint" | "hashlist" | "work";
 
 type CliArgs = {
   cache: string;
-  collectionDir: string;
+  collection: string;
   command: Command;
   target: string;
   help: boolean;
@@ -35,13 +29,14 @@ type CliArgs = {
 const usage = (): void => {
   console.error(`Usage:
   npx tsx verify.ts [--cache DIR] <hashlist>
-  npx tsx verify.ts [--cache DIR] [--collection DIR] <url>
+  npx tsx verify.ts [--cache DIR] [--collection NAME] <url>
   npx tsx verify.ts checkpoint
 
 <hashlist>  Verify a Project Timestamper hash list file against <hashlist>.ots.
 
 <url>       Download a work (e.g. a WikiArt painting), SHA-256 it, find it in
-            ~/timestamper/docs/wikiart_works/$PREFIX, then verify PREFIX.ots.
+            project-timestamper.github.io/timestamper/$COLLECTION/$PREFIX,
+            then verify PREFIX.ots. Default collection is wikiart_works.
 
 checkpoint  Walk every header from genesis to the SPV checkpoint.
 `);
@@ -53,7 +48,7 @@ const isUrl = (value: string): boolean =>
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {
     cache: path.join(here, "cache"),
-    collectionDir: DEFAULT_COLLECTION,
+    collection: DEFAULT_COLLECTION,
     command: "hashlist",
     target: "my_file",
     help: false,
@@ -72,11 +67,11 @@ const parseArgs = (argv: string[]): CliArgs => {
       args.cache = dir;
       i += 1;
     } else if (a === "--collection") {
-      const dir = argv[i + 1];
-      if (dir === undefined) {
-        throw new Error("--collection requires a directory");
+      const name = argv[i + 1];
+      if (name === undefined) {
+        throw new Error("--collection requires a name or URL");
       }
-      args.collectionDir = dir;
+      args.collection = name;
       i += 1;
     } else if (a === "-h" || a === "--help") {
       args.help = true;
@@ -100,9 +95,16 @@ const download = async (url: string): Promise<Buffer> => {
     redirect: "follow",
   });
   if (!response.ok) {
-    throw new Error(`download failed: ${response.status} ${response.statusText}`);
+    throw new Error(`download failed: ${response.status} ${response.statusText} (${url})`);
   }
   return Buffer.from(await response.arrayBuffer());
+};
+
+const collectionBase = (collection: string): string => {
+  if (isUrl(collection)) {
+    return collection.replace(/\/$/, "");
+  }
+  return `${PAGES_BASE}/${collection}`;
 };
 
 const hashListContains = (list: Buffer, digest: Buffer): boolean => {
@@ -149,20 +151,22 @@ const cmdWork = async (args: CliArgs): Promise<void> => {
   console.log(`sha256 = ${hex}`);
   console.log(`prefix = ${prefix}`);
 
-  const listPath = path.join(args.collectionDir, prefix);
-  const otsPath = `${listPath}.ots`;
-  if (!fs.existsSync(listPath)) {
-    throw new Error(`missing hash list: ${listPath}`);
-  }
-  const list = fs.readFileSync(listPath);
+  const base = collectionBase(args.collection);
+  const listUrl = `${base}/${prefix}`;
+  const otsUrl = `${listUrl}.ots`;
+  console.log(`fetching ${listUrl}`);
+  const list = await download(listUrl);
   if (!hashListContains(list, digest)) {
-    throw new Error(`digest not found in ${listPath}`);
+    throw new Error(`digest not found in ${listUrl}`);
   }
-  console.log(`digest found in ${listPath} (${list.length / HASH_BYTES} hashes)`);
+  console.log(`digest found in ${listUrl} (${list.length / HASH_BYTES} hashes)`);
+  console.log(`fetching ${otsUrl}`);
+  const otsBytes = await download(otsUrl);
 
   const best = await verifyDetachedOts({
-    filePath: listPath,
-    otsPath,
+    fileBytes: list,
+    otsBytes,
+    label: prefix,
     cacheDir: args.cache,
   });
   console.log(
