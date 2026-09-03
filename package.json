@@ -2,6 +2,7 @@
   "name": "stamper",
   "version": "0.1.0",
   "private": true,
+  "author": "Arthur Edelstein <arthur@projecttimestamper.org>",
   "type": "module",
   "engines": {
     "node": ">=18"
