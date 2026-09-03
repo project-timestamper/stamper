@@ -1,47 +1,61 @@
-#!/usr/bin/env tsx
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectSome, DEFAULT_SERVERS, type ElectrumClient } from "./lib/electrum.ts";
-import {
-  CHECKPOINT,
-  HeaderStore,
-  syncHeaders,
-  verifyCheckpoint,
-} from "./lib/headers.ts";
-import { hashFile, isBitcoinLeaf, isPendingLeaf, parseOts } from "./lib/ots.ts";
+import { verifyCheckpoint } from "./lib/headers.ts";
 import { errorMessage } from "./lib/util.ts";
+import {
+  formatTime,
+  verifyDetachedOts,
+  withClients,
+} from "./lib/verify-ots.ts";
+
+const HASH_BYTES = 32;
+const PREFIX_HEX_DIGITS = 2;
+const DEFAULT_COLLECTION = path.join(
+  os.homedir(),
+  "timestamper",
+  "docs",
+  "wikiart_works"
+);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-type Command = "verify" | "checkpoint";
+type Command = "checkpoint" | "hashlist" | "work";
 
 type CliArgs = {
   cache: string;
+  collectionDir: string;
   command: Command;
-  file: string;
+  target: string;
   help: boolean;
 };
 
 const usage = (): void => {
   console.error(`Usage:
-  npx tsx verify.ts [--cache DIR] <file>
+  npx tsx verify.ts [--cache DIR] <hashlist>
+  npx tsx verify.ts [--cache DIR] [--collection DIR] <url>
   npx tsx verify.ts checkpoint
 
-<file>     Hash <file>, parse <file>.ots, sync headers from the Sept 2024
-           checkpoint, and verify the Merkle path against that chain.
+<hashlist>  Verify a Project Timestamper hash list file against <hashlist>.ots.
 
-checkpoint Walk every header from genesis to the checkpoint, check proof of
-           work, and confirm the hardcoded checkpoint hash. Does not store
-           the pre-checkpoint chain.
+<url>       Download a work (e.g. a WikiArt painting), SHA-256 it, find it in
+            ~/timestamper/docs/wikiart_works/\$PREFIX, then verify PREFIX.ots.
+
+checkpoint  Walk every header from genesis to the SPV checkpoint.
 `);
 };
+
+const isUrl = (value: string): boolean =>
+  value.startsWith("https://") || value.startsWith("http://");
 
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {
     cache: path.join(here, "cache"),
-    command: "verify",
-    file: "my_file",
+    collectionDir: DEFAULT_COLLECTION,
+    command: "hashlist",
+    target: "my_file",
     help: false,
   };
   const rest: string[] = [];
@@ -50,10 +64,15 @@ const parseArgs = (argv: string[]): CliArgs => {
     if (a === undefined) continue;
     if (a === "--cache") {
       const dir = argv[i + 1];
-      if (dir === undefined) {
-        throw new Error("--cache requires a directory");
-      }
+      if (dir === undefined) throw new Error("--cache requires a directory");
       args.cache = dir;
+      i += 1;
+    } else if (a === "--collection") {
+      const dir = argv[i + 1];
+      if (dir === undefined) {
+        throw new Error("--collection requires a directory");
+      }
+      args.collectionDir = dir;
       i += 1;
     } else if (a === "-h" || a === "--help") {
       args.help = true;
@@ -62,27 +81,41 @@ const parseArgs = (argv: string[]): CliArgs => {
     }
   }
   const first = rest[0];
-  if (first === "checkpoint") args.command = "checkpoint";
-  else if (first !== undefined) args.file = first;
+  if (first === "checkpoint") {
+    args.command = "checkpoint";
+  } else if (first !== undefined) {
+    args.target = first;
+    args.command = isUrl(first) ? "work" : "hashlist";
+  }
   return args;
 };
 
-const formatTime = (unix: number): string =>
-  new Date(unix * 1000).toISOString().replace(".000Z", "Z");
-
-const withClients = async <T>(
-  fn: (clients: ElectrumClient[]) => Promise<T>
-): Promise<T> => {
-  const clients = await connectSome(DEFAULT_SERVERS, {
-    min: 2,
-    timeoutMs: 120_000,
+const download = async (url: string): Promise<Buffer> => {
+  const response = await fetch(url, {
+    headers: { "user-agent": "stamper/0.1 (Project Timestamper verifier)" },
+    redirect: "follow",
   });
-  console.error(`connected to ${clients.length} Electrum server(s)`);
-  try {
-    return await fn(clients);
-  } finally {
-    for (const c of clients) c.close();
+  if (!response.ok) {
+    throw new Error(`download failed: ${response.status} ${response.statusText}`);
   }
+  return Buffer.from(await response.arrayBuffer());
+};
+
+const hashListContains = (list: Buffer, digest: Buffer): boolean => {
+  if (digest.length !== HASH_BYTES) {
+    throw new Error(`expected ${HASH_BYTES}-byte digest`);
+  }
+  if (list.length % HASH_BYTES !== 0) {
+    throw new Error(
+      `hash list length ${list.length} is not a multiple of ${HASH_BYTES}`
+    );
+  }
+  for (let offset = 0; offset < list.length; offset += HASH_BYTES) {
+    if (list.subarray(offset, offset + HASH_BYTES).equals(digest)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const cmdCheckpoint = async (): Promise<void> => {
@@ -92,71 +125,44 @@ const cmdCheckpoint = async (): Promise<void> => {
   );
 };
 
-const cmdVerify = async (args: CliArgs): Promise<void> => {
-  const filePath = path.resolve(args.file);
-  const otsPath = `${filePath}.ots`;
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`missing file: ${filePath}`);
-  }
-  if (!fs.existsSync(otsPath)) {
-    throw new Error(`missing proof: ${otsPath}`);
-  }
-
-  const ots = parseOts(fs.readFileSync(otsPath));
-  const fileDigest = hashFile(filePath, ots.hashName);
+const cmdHashlist = async (args: CliArgs): Promise<void> => {
+  const filePath = path.resolve(args.target);
+  const best = await verifyDetachedOts({
+    filePath,
+    cacheDir: args.cache,
+  });
   console.log(
-    `${ots.hashName}(${path.basename(filePath)}) = ${fileDigest.toString("hex")}`
+    `Success! Bitcoin block ${best.height} (${best.hash}) attests the hash list existed as of ${formatTime(best.time)}`
   );
-  console.log(`ots file digest                 = ${ots.fileDigest.toString("hex")}`);
-  if (!fileDigest.equals(ots.fileDigest)) {
-    console.log("FAIL: file hash does not match the digest in the .ots proof");
-    process.exit(1);
+};
+
+const cmdWork = async (args: CliArgs): Promise<void> => {
+  console.log(`downloading ${args.target}`);
+  const bytes = await download(args.target);
+  const digest = createHash("sha256").update(bytes).digest();
+  const hex = digest.toString("hex");
+  const prefix = hex.slice(0, PREFIX_HEX_DIGITS).toUpperCase();
+  console.log(`sha256 = ${hex}`);
+  console.log(`prefix = ${prefix}`);
+
+  const listPath = path.join(args.collectionDir, prefix);
+  const otsPath = `${listPath}.ots`;
+  if (!fs.existsSync(listPath)) {
+    throw new Error(`missing hash list: ${listPath}`);
   }
-
-  const bitcoinAttestations = ots.attestations.filter(isBitcoinLeaf);
-  if (bitcoinAttestations.length === 0) {
-    const pending = ots.attestations.filter(isPendingLeaf);
-    if (pending.length > 0) {
-      console.log("FAIL: proof is not complete (pending calendar attestation only)");
-      for (const p of pending) console.log(`  calendar: ${p.attestation.uri}`);
-    } else {
-      console.log("FAIL: no Bitcoin block-header attestation in the proof");
-    }
-    process.exit(1);
+  const list = fs.readFileSync(listPath);
+  if (!hashListContains(list, digest)) {
+    throw new Error(`digest not found in ${listPath}`);
   }
+  console.log(`digest found in ${listPath} (${list.length / HASH_BYTES} hashes)`);
 
-  for (const { attestation } of bitcoinAttestations) {
-    if (attestation.height < CHECKPOINT.height) {
-      console.log(
-        `FAIL: attestation at height ${attestation.height} is before checkpoint ${CHECKPOINT.height}`
-      );
-      process.exit(1);
-    }
-  }
-
-  const store = new HeaderStore(args.cache);
-  const chain = await withClients((clients) => syncHeaders(store, clients));
-
-  let best: { height: number; time: number; hash: string } | null = null;
-  for (const { msg, attestation } of bitcoinAttestations) {
-    const header = chain.at(attestation.height);
-    const match = msg.equals(header.merkleRoot);
-    const line = match
-      ? `OK  Bitcoin block ${attestation.height} merkle root matches`
-      : `FAIL Bitcoin block ${attestation.height}: proof root ${msg.toString("hex")} != header ${header.merkleRoot.toString("hex")}`;
-    console.log(line);
-    if (match && (best === null || attestation.height < best.height)) {
-      best = { height: attestation.height, time: header.time, hash: header.id };
-    }
-  }
-
-  if (best === null) {
-    console.log("Verification failed.");
-    process.exit(1);
-  }
-
+  const best = await verifyDetachedOts({
+    filePath: listPath,
+    otsPath,
+    cacheDir: args.cache,
+  });
   console.log(
-    `Success! Bitcoin block ${best.height} (${best.hash}) attests the file existed as of ${formatTime(best.time)}`
+    `Success! The work's SHA-256 is in ${prefix}, and Bitcoin block ${best.height} (${best.hash}) attests that hash list existed as of ${formatTime(best.time)}`
   );
 };
 
@@ -167,7 +173,8 @@ const main = async (): Promise<void> => {
     process.exit(0);
   }
   if (args.command === "checkpoint") await cmdCheckpoint();
-  else await cmdVerify(args);
+  else if (args.command === "work") await cmdWork(args);
+  else await cmdHashlist(args);
 };
 
 main().catch((err: unknown) => {
