@@ -7,6 +7,16 @@
     "node": ">=18"
   },
   "bin": {
-    "stamper": "./verify.js"
+    "stamper": "./verify.ts"
+  },
+  "scripts": {
+    "start": "tsx verify.ts",
+    "checkpoint": "tsx verify.ts checkpoint",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
   }
 }

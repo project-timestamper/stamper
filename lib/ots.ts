@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 const MAGIC = Buffer.from(
   "\x00OpenTimestamps\x00\x00Proof\x00\xbf\x89\xe2\xe8\x84\xe8\x92\x94",
-  "binary"
+  "latin1"
 );
 
 const TAG_ATTESTATION = 0x00;
@@ -20,11 +20,50 @@ const TAG_KECCAK256 = 0x67;
 const BITCOIN_ATTESTATION_TAG = Buffer.from("0588960d73d71901", "hex");
 const PENDING_ATTESTATION_TAG = Buffer.from("83dfe30d2ef90c8e", "hex");
 
-const cursor = (buf) => ({ buf, off: 0 });
+type Cursor = {
+  buf: Buffer;
+  off: number;
+};
 
-const remaining = (cur) => cur.buf.length - cur.off;
+export type BitcoinAttestation = {
+  type: "bitcoin";
+  height: number;
+};
 
-const read = (cur, n) => {
+export type PendingAttestation = {
+  type: "pending";
+  uri: string;
+};
+
+export type UnknownAttestation = {
+  type: "unknown";
+  tag: string;
+};
+
+export type TimeAttestation =
+  | BitcoinAttestation
+  | PendingAttestation
+  | UnknownAttestation;
+
+export type TimestampLeaf = {
+  msg: Buffer;
+  attestation: TimeAttestation;
+};
+
+export type FileHashName = "sha1" | "ripemd160" | "sha256";
+
+export type OtsProof = {
+  fileHashOp: number;
+  hashName: FileHashName;
+  fileDigest: Buffer;
+  attestations: TimestampLeaf[];
+};
+
+const cursor = (buf: Buffer): Cursor => ({ buf, off: 0 });
+
+const remaining = (cur: Cursor): number => cur.buf.length - cur.off;
+
+const read = (cur: Cursor, n: number): Buffer => {
   if (cur.off + n > cur.buf.length) {
     throw new Error("unexpected end of OTS file");
   }
@@ -33,9 +72,15 @@ const read = (cur, n) => {
   return slice;
 };
 
-const readByte = (cur) => read(cur, 1)[0];
+const readByte = (cur: Cursor): number => {
+  const byte = read(cur, 1)[0];
+  if (byte === undefined) {
+    throw new Error("unexpected end of OTS file");
+  }
+  return byte;
+};
 
-const readVaruint = (cur) => {
+const readVaruint = (cur: Cursor): number => {
   let value = 0;
   let shift = 0;
   for (;;) {
@@ -47,15 +92,16 @@ const readVaruint = (cur) => {
   }
 };
 
-const readVarbytes = (cur, max = 4096) => {
+const readVarbytes = (cur: Cursor, max = 4096): Buffer => {
   const len = readVaruint(cur);
   if (len > max) throw new Error(`varbytes too long: ${len}`);
   return read(cur, len);
 };
 
-const hashNamed = (name, data) => createHash(name).update(data).digest();
+const hashNamed = (name: FileHashName, data: Buffer): Buffer =>
+  createHash(name).update(data).digest();
 
-const applyOp = (tag, cur, msg) => {
+const applyOp = (tag: number, cur: Cursor, msg: Buffer): Buffer => {
   switch (tag) {
     case TAG_SHA1:
       return hashNamed("sha1", msg);
@@ -78,7 +124,7 @@ const applyOp = (tag, cur, msg) => {
   }
 };
 
-const digestLengthForTag = (tag) => {
+const digestLengthForTag = (tag: number): number => {
   switch (tag) {
     case TAG_SHA1:
     case TAG_RIPEMD160:
@@ -91,7 +137,7 @@ const digestLengthForTag = (tag) => {
   }
 };
 
-const hashNameForTag = (tag) => {
+const hashNameForTag = (tag: number): FileHashName => {
   switch (tag) {
     case TAG_SHA1:
       return "sha1";
@@ -100,11 +146,11 @@ const hashNameForTag = (tag) => {
     case TAG_SHA256:
       return "sha256";
     default:
-      return `op-0x${tag.toString(16)}`;
+      throw new Error(`unsupported file hash op 0x${tag.toString(16)}`);
   }
 };
 
-const parseAttestation = (cur) => {
+const parseAttestation = (cur: Cursor): TimeAttestation => {
   const tag = read(cur, 8);
   const payload = readVarbytes(cur, 8192);
   const body = cursor(payload);
@@ -117,7 +163,12 @@ const parseAttestation = (cur) => {
   return { type: "unknown", tag: tag.toString("hex") };
 };
 
-const parseTag = (cur, tag, msg, attestations) => {
+const parseTag = (
+  cur: Cursor,
+  tag: number,
+  msg: Buffer,
+  attestations: TimestampLeaf[]
+): void => {
   if (tag === TAG_ATTESTATION) {
     attestations.push({ msg, attestation: parseAttestation(cur) });
     return;
@@ -125,7 +176,11 @@ const parseTag = (cur, tag, msg, attestations) => {
   parseTimestamp(cur, applyOp(tag, cur, msg), attestations);
 };
 
-const parseTimestamp = (cur, msg, attestations) => {
+const parseTimestamp = (
+  cur: Cursor,
+  msg: Buffer,
+  attestations: TimestampLeaf[]
+): void => {
   let tag = readByte(cur);
   while (tag === TAG_FORK) {
     parseTag(cur, readByte(cur), msg, attestations);
@@ -134,7 +189,7 @@ const parseTimestamp = (cur, msg, attestations) => {
   parseTag(cur, tag, msg, attestations);
 };
 
-export const parseOts = (buf) => {
+export const parseOts = (buf: Buffer): OtsProof => {
   const cur = cursor(buf);
   const magic = read(cur, MAGIC.length);
   if (!magic.equals(MAGIC)) {
@@ -147,7 +202,7 @@ export const parseOts = (buf) => {
   const fileHashOp = readByte(cur);
   const digestLen = digestLengthForTag(fileHashOp);
   const fileDigest = Buffer.from(read(cur, digestLen));
-  const attestations = [];
+  const attestations: TimestampLeaf[] = [];
   parseTimestamp(cur, fileDigest, attestations);
   if (remaining(cur) !== 0) {
     throw new Error("trailing bytes in OTS file");
@@ -160,7 +215,17 @@ export const parseOts = (buf) => {
   };
 };
 
-export const hashFile = (filePath, hashName) => {
+export const hashFile = (filePath: string, hashName: FileHashName): Buffer => {
   const data = fs.readFileSync(filePath);
   return createHash(hashName).update(data).digest();
 };
+
+export const isBitcoinLeaf = (
+  leaf: TimestampLeaf
+): leaf is TimestampLeaf & { attestation: BitcoinAttestation } =>
+  leaf.attestation.type === "bitcoin";
+
+export const isPendingLeaf = (
+  leaf: TimestampLeaf
+): leaf is TimestampLeaf & { attestation: PendingAttestation } =>
+  leaf.attestation.type === "pending";
