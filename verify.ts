@@ -1,28 +1,23 @@
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { gunzipSync } from "node:zlib";
 import {
   DEFAULT_COLLECTION,
   collectionNames,
-  lookupCollection,
-  type CollectionMeta,
 } from "./lib/collections.ts";
 import { verifyCheckpoint } from "./lib/headers.ts";
-import {
-  downloadTorrent,
-  isHttpUrl,
-  isMagnetUri,
-  verifyTorrentContent,
-} from "./lib/torrent.ts";
 import { errorMessage } from "./lib/util.ts";
 import {
   formatTime,
   verifyDetachedOts,
   withClients,
 } from "./lib/verify-ots.ts";
-
-const PAGES_BASE = "https://project-timestamper.github.io/timestamper";
+import {
+  attestDigest,
+  digestWork,
+  isTorrentWorkTarget,
+  isWorkTarget,
+  resolveCollection,
+} from "./lib/work.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,9 +53,6 @@ const usage = (): void => {
 checkpoint  Walk every header from genesis to the SPV checkpoint.
 `);
 };
-
-const isWorkTarget = (value: string): boolean =>
-  isHttpUrl(value) || isMagnetUri(value);
 
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {
@@ -106,57 +98,6 @@ const parseArgs = (argv: string[]): CliArgs => {
   return args;
 };
 
-const download = async (url: string): Promise<Buffer> => {
-  const response = await fetch(url, {
-    headers: { "user-agent": "stamper/0.1 (Project Timestamper verifier)" },
-    redirect: "follow",
-  });
-  if (!response.ok) {
-    throw new Error(`download failed: ${response.status} ${response.statusText} (${url})`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-};
-
-/** Resolve collection name (for metadata) and fetch base URL. */
-const resolveCollection = (
-  collection: string
-): { name: string; baseUrl: string; meta: CollectionMeta } => {
-  if (isHttpUrl(collection)) {
-    const baseUrl = collection.replace(/\/$/, "");
-    const name = baseUrl.split("/").pop();
-    if (name === undefined || name === "") {
-      throw new Error(`could not derive collection name from URL: ${collection}`);
-    }
-    return { name, baseUrl, meta: lookupCollection(name) };
-  }
-  return {
-    name: collection,
-    baseUrl: `${PAGES_BASE}/${collection}`,
-    meta: lookupCollection(collection),
-  };
-};
-
-const hashListContains = (
-  list: Buffer,
-  digest: Buffer,
-  hashBytes: number
-): boolean => {
-  if (digest.length !== hashBytes) {
-    throw new Error(`expected ${hashBytes}-byte digest`);
-  }
-  if (list.length % hashBytes !== 0) {
-    throw new Error(
-      `hash list length ${list.length} is not a multiple of ${hashBytes}`
-    );
-  }
-  for (let offset = 0; offset < list.length; offset += hashBytes) {
-    if (list.subarray(offset, offset + hashBytes).equals(digest)) {
-      return true;
-    }
-  }
-  return false;
-};
-
 const cmdCheckpoint = async (): Promise<void> => {
   const result = await withClients((clients) => verifyCheckpoint(clients));
   console.log(
@@ -175,84 +116,50 @@ const cmdHashlist = async (args: CliArgs): Promise<void> => {
   );
 };
 
-const isTorrentCollection = (meta: CollectionMeta): boolean =>
-  meta.hashName === "sha1" && meta.hashBytes === 20;
-
-const digestWork = async (
-  args: CliArgs,
-  meta: CollectionMeta
-): Promise<Buffer> => {
-  const torrentSource =
-    isMagnetUri(args.target) ||
-    (isTorrentCollection(meta) && isHttpUrl(args.target));
-
-  if (torrentSource) {
-    if (!isTorrentCollection(meta)) {
-      throw new Error(
-        `magnet/.torrent URLs require a torrent infohash collection (sha1, 20 bytes); got ${args.collection} (${meta.hashName}, ${meta.hashBytes} bytes)`
-      );
-    }
-    const downloadDir = path.join(args.cache, "torrents");
-    console.log(`downloading torrent content via WebTorrent -> ${downloadDir}`);
-    const downloaded = await downloadTorrent(args.target, { downloadDir });
-    console.log(`verifying infohash and piece hashes`);
-    const { infoHash } = await verifyTorrentContent({
-      info: downloaded.info,
-      expectedInfoHash: downloaded.expectedInfoHash,
-      filePaths: downloaded.filePaths,
-    });
-    console.log(`torrent content matches infohash ${infoHash.toString("hex")}`);
-    return infoHash;
-  }
-
-  console.log(`downloading ${args.target}`);
-  const bytes = await download(args.target);
-  const payload = meta.gunzipBeforeHash ? gunzipSync(bytes) : bytes;
-  if (meta.gunzipBeforeHash) {
-    console.log(
-      `gunzipped ${bytes.length} -> ${payload.length} bytes before hashing`
-    );
-  }
-  return createHash(meta.hashName).update(payload).digest();
-};
-
 const cmdWork = async (args: CliArgs): Promise<void> => {
   const { name, baseUrl, meta } = resolveCollection(args.collection);
   console.log(
     `collection ${name}: ${meta.hashName}, ${meta.hashBytes} bytes/hash, prefix ${meta.prefixHexDigits} hex digits`
   );
-  const digest = await digestWork(args, meta);
-  if (digest.length !== meta.hashBytes) {
-    throw new Error(
-      `digest length ${digest.length} does not match collection ${meta.hashBytes}`
+
+  if (isTorrentWorkTarget(args.target, meta)) {
+    console.log(
+      `downloading torrent content via WebTorrent -> ${path.join(args.cache, "torrents")}`
+    );
+  } else {
+    console.log(`downloading ${args.target}`);
+  }
+
+  const digested = await digestWork(args.target, meta, {
+    cacheDir: args.cache,
+    collectionName: name,
+  });
+  if (digested.kind === "torrent") {
+    console.log(
+      `torrent content matches infohash ${digested.digest.toString("hex")}`
+    );
+  } else if (digested.gunzipped) {
+    console.log(
+      `gunzipped ${digested.downloadedBytes} -> ${digested.hashedBytes} bytes before hashing`
     );
   }
-  const hex = digest.toString("hex");
-  const prefix = hex.slice(0, meta.prefixHexDigits).toUpperCase();
+
+  const hex = digested.digest.toString("hex");
   console.log(`${meta.hashName} = ${hex}`);
-  console.log(`prefix = ${prefix}`);
 
-  const listUrl = `${baseUrl}/${prefix}`;
-  const otsUrl = `${listUrl}.ots`;
-  console.log(`fetching ${listUrl}`);
-  const list = await download(listUrl);
-  if (!hashListContains(list, digest, meta.hashBytes)) {
-    throw new Error(`digest not found in ${listUrl}`);
-  }
-  console.log(
-    `digest found in ${listUrl} (found among ${list.length / meta.hashBytes} hashes)`
-  );
-  console.log(`fetching ${otsUrl}`);
-  const otsBytes = await download(otsUrl);
-
-  const best = await verifyDetachedOts({
-    fileBytes: list,
-    otsBytes,
-    label: prefix,
+  console.log(`fetching hash list for prefix...`);
+  const { prefix, listUrl, hashCount, attestation } = await attestDigest({
+    digest: digested.digest,
+    baseUrl,
+    meta,
     cacheDir: args.cache,
   });
+  console.log(`prefix = ${prefix}`);
   console.log(
-    `Success! The work's ${meta.hashName} is in ${prefix}, and Bitcoin block ${best.height} (${best.hash}) attests that hash list existed as of ${formatTime(best.time)}`
+    `digest found in ${listUrl} (found among ${hashCount} hashes)`
+  );
+  console.log(
+    `Success! The work's ${meta.hashName} is in ${prefix}, and Bitcoin block ${attestation.height} (${attestation.hash}) attests that hash list existed as of ${formatTime(attestation.time)}`
   );
 };
 
