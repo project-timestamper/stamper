@@ -5,6 +5,8 @@ export type CollectionMeta = {
   hashName: WorkHashName;
   hashBytes: number;
   prefixHexDigits: number;
+  /** If set, gunzip the download before hashing (e.g. NCBI *.fna.gz). */
+  gunzipBeforeHash?: boolean;
 };
 
 export const COLLECTIONS: Readonly<Record<string, CollectionMeta>> = {
@@ -21,7 +23,12 @@ export const COLLECTIONS: Readonly<Record<string, CollectionMeta>> = {
     hashBytes: 32,
     prefixHexDigits: 4,
   },
-  ncbi_genomes: { hashName: "sha256", hashBytes: 32, prefixHexDigits: 3 },
+  ncbi_genomes: {
+    hashName: "sha256",
+    hashBytes: 32,
+    prefixHexDigits: 3,
+    gunzipBeforeHash: true,
+  },
 };
 
 export const DEFAULT_COLLECTION = "wikiart_works";

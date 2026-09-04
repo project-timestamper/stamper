@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import {
   DEFAULT_COLLECTION,
   collectionNames,
@@ -206,7 +207,13 @@ const digestWork = async (
 
   console.log(`downloading ${args.target}`);
   const bytes = await download(args.target);
-  return createHash(meta.hashName).update(bytes).digest();
+  const payload = meta.gunzipBeforeHash ? gunzipSync(bytes) : bytes;
+  if (meta.gunzipBeforeHash) {
+    console.log(
+      `gunzipped ${bytes.length} -> ${payload.length} bytes before hashing`
+    );
+  }
+  return createHash(meta.hashName).update(payload).digest();
 };
 
 const cmdWork = async (args: CliArgs): Promise<void> => {
