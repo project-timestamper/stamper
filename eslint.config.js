@@ -13,6 +13,7 @@ export default defineConfig(
       curly: ["error", "all"],
       "@stylistic/brace-style": ["error", "1tbs", { allowSingleLine: false }],
       "@stylistic/indent": ["error", 2],
+      "@stylistic/semi": ["error", "never"],
     },
   },
   {

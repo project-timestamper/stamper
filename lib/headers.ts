@@ -1,26 +1,26 @@
-import { createHash } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import { type ElectrumClient } from "./electrum.ts";
-import { errorMessage } from "./util.ts";
+import { createHash } from "node:crypto"
+import fs from "node:fs"
+import path from "node:path"
+import { type ElectrumClient } from "./electrum.ts"
+import { errorMessage } from "./util.ts"
 
-export const HEADER_SIZE = 80;
-export const RETARGET_INTERVAL = 2016;
-export const TARGET_TIMESPAN = 14 * 24 * 60 * 60;
-export const MAX_BITS = 0x1d00ffff;
+export const HEADER_SIZE = 80
+export const RETARGET_INTERVAL = 2016
+export const TARGET_TIMESPAN = 14 * 24 * 60 * 60
+export const MAX_BITS = 0x1d00ffff
 export const GENESIS_HASH =
-  "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
+  "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
 
 export type Checkpoint = {
   height: number;
   hash: string;
-};
+}
 
 /** Last difficulty retarget before September 2024. */
 export const CHECKPOINT: Checkpoint = {
   height: 858816,
   hash: "00000000000000000000fcddd3a12dff20bb1a246e073b3d7caccb0453e24ac2",
-};
+}
 
 export type BlockHeader = {
   raw: Buffer;
@@ -32,57 +32,57 @@ export type BlockHeader = {
   nonce: number;
   hash: Buffer;
   id: string;
-};
+}
 
-export type LogFn = (message: string) => void;
+export type LogFn = (message: string) => void
 
 export const compactToTarget = (bits: number): bigint => {
-  const exp = bits >>> 24;
-  const mant = bits & 0x007fffff;
+  const exp = bits >>> 24
+  const mant = bits & 0x007fffff
   if (exp <= 3) {
-    return BigInt(mant) >> BigInt(8 * (3 - exp));
+    return BigInt(mant) >> BigInt(8 * (3 - exp))
   }
-  return BigInt(mant) << BigInt(8 * (exp - 3));
-};
+  return BigInt(mant) << BigInt(8 * (exp - 3))
+}
 
-const MAX_TARGET = compactToTarget(MAX_BITS);
+const MAX_TARGET = compactToTarget(MAX_BITS)
 
 export const doubleSha256 = (buf: Buffer): Buffer =>
   createHash("sha256")
     .update(createHash("sha256").update(buf).digest())
-    .digest();
+    .digest()
 
 export const hashToId = (hashLe: Buffer): string =>
-  Buffer.from(hashLe).reverse().toString("hex");
+  Buffer.from(hashLe).reverse().toString("hex")
 
 export const targetToCompact = (target: bigint): number => {
   if (target === 0n) {
-    return 0;
+    return 0
   }
-  let hex = target.toString(16);
+  let hex = target.toString(16)
   if (hex.length % 2) {
-    hex = `0${hex}`;
+    hex = `0${hex}`
   }
-  let size = hex.length / 2;
-  let compact: number;
+  let size = hex.length / 2
+  let compact: number
   if (size <= 3) {
-    compact = Number(target) << (8 * (3 - size));
+    compact = Number(target) << (8 * (3 - size))
   } else {
-    compact = Number(target >> BigInt(8 * (size - 3)));
+    compact = Number(target >> BigInt(8 * (size - 3)))
   }
   if (compact & 0x00800000) {
-    compact >>= 8;
-    size += 1;
+    compact >>= 8
+    size += 1
   }
-  return (size << 24) | compact;
-};
+  return (size << 24) | compact
+}
 
 export const parseHeader = (buf: Buffer, offset = 0): BlockHeader => {
-  const raw = buf.subarray(offset, offset + HEADER_SIZE);
+  const raw = buf.subarray(offset, offset + HEADER_SIZE)
   if (raw.length !== HEADER_SIZE) {
-    throw new Error("truncated header");
+    throw new Error("truncated header")
   }
-  const hash = doubleSha256(raw);
+  const hash = doubleSha256(raw)
   return {
     raw: Buffer.from(raw),
     version: raw.readUInt32LE(0),
@@ -93,30 +93,30 @@ export const parseHeader = (buf: Buffer, offset = 0): BlockHeader => {
     nonce: raw.readUInt32LE(76),
     hash,
     id: hashToId(hash),
-  };
-};
+  }
+}
 
-const hashAsInt = (hashLe: Buffer): bigint => BigInt("0x" + hashToId(hashLe));
+const hashAsInt = (hashLe: Buffer): bigint => BigInt("0x" + hashToId(hashLe))
 
 const retargetBits = (first: BlockHeader, last: BlockHeader): number => {
-  let timespan = last.time - first.time;
-  const min = Math.floor(TARGET_TIMESPAN / 4);
-  const max = TARGET_TIMESPAN * 4;
+  let timespan = last.time - first.time
+  const min = Math.floor(TARGET_TIMESPAN / 4)
+  const max = TARGET_TIMESPAN * 4
   if (timespan < min) {
-    timespan = min;
+    timespan = min
   }
   if (timespan > max) {
-    timespan = max;
+    timespan = max
   }
   let next =
-    (compactToTarget(first.bits) * BigInt(timespan)) / BigInt(TARGET_TIMESPAN);
+    (compactToTarget(first.bits) * BigInt(timespan)) / BigInt(TARGET_TIMESPAN)
   if (next > MAX_TARGET) {
-    next = MAX_TARGET;
+    next = MAX_TARGET
   }
-  return targetToCompact(next);
-};
+  return targetToCompact(next)
+}
 
-type HeaderLookup = (height: number) => BlockHeader | null;
+type HeaderLookup = (height: number) => BlockHeader | null
 
 export const verifyHeader = (
   header: BlockHeader,
@@ -125,89 +125,89 @@ export const verifyHeader = (
   lookup: HeaderLookup
 ): void => {
   if (hashAsInt(header.hash) > compactToTarget(header.bits)) {
-    throw new Error(`insufficient proof of work at height ${height}`);
+    throw new Error(`insufficient proof of work at height ${height}`)
   }
   if (height === 0) {
     if (header.id !== GENESIS_HASH) {
-      throw new Error(`bad genesis hash ${header.id}`);
+      throw new Error(`bad genesis hash ${header.id}`)
     }
-    return;
+    return
   }
   if (prev === null) {
     if (height === CHECKPOINT.height) {
       if (header.id !== CHECKPOINT.hash) {
         throw new Error(
           `checkpoint mismatch: ${header.id} != ${CHECKPOINT.hash}`
-        );
+        )
       }
-      return;
+      return
     }
-    throw new Error(`missing previous header at height ${height}`);
+    throw new Error(`missing previous header at height ${height}`)
   }
   if (!header.prevHash.equals(prev.hash)) {
-    throw new Error(`prev-hash mismatch at height ${height}`);
+    throw new Error(`prev-hash mismatch at height ${height}`)
   }
   if (height % RETARGET_INTERVAL !== 0) {
     if (header.bits !== prev.bits) {
-      throw new Error(`difficulty mismatch at height ${height}`);
+      throw new Error(`difficulty mismatch at height ${height}`)
     }
-    return;
+    return
   }
-  const first = lookup(height - RETARGET_INTERVAL);
+  const first = lookup(height - RETARGET_INTERVAL)
   if (first === null) {
-    return;
+    return
   }
-  const want = retargetBits(first, prev);
+  const want = retargetBits(first, prev)
   if (compactToTarget(header.bits) !== compactToTarget(want)) {
-    throw new Error(`difficulty mismatch at height ${height}`);
+    throw new Error(`difficulty mismatch at height ${height}`)
   }
-};
+}
 
 export class HeaderChain {
-  buf: Buffer;
-  readonly startHeight: number;
+  buf: Buffer
+  readonly startHeight: number
 
   constructor(buf: Buffer, startHeight: number) {
-    this.buf = buf;
-    this.startHeight = startHeight;
+    this.buf = buf
+    this.startHeight = startHeight
   }
 
   get count(): number {
-    return this.buf.length / HEADER_SIZE;
+    return this.buf.length / HEADER_SIZE
   }
 
   get tipHeight(): number {
     return this.count === 0
       ? this.startHeight - 1
-      : this.startHeight + this.count - 1;
+      : this.startHeight + this.count - 1
   }
 
   at(height: number): BlockHeader {
-    const index = height - this.startHeight;
-    const offset = index * HEADER_SIZE;
+    const index = height - this.startHeight
+    const offset = index * HEADER_SIZE
     if (index < 0 || offset + HEADER_SIZE > this.buf.length) {
-      throw new Error(`header ${height} not in local chain`);
+      throw new Error(`header ${height} not in local chain`)
     }
-    return parseHeader(this.buf, offset);
+    return parseHeader(this.buf, offset)
   }
 
   verifyRange(fromHeight: number, toHeight: number): void {
     if (!Number.isInteger(this.count)) {
-      throw new Error("header cache is not a multiple of 80 bytes");
+      throw new Error("header cache is not a multiple of 80 bytes")
     }
     for (let height = fromHeight; height <= toHeight; height++) {
-      const header = this.at(height);
-      const prev = height > this.startHeight ? this.at(height - 1) : null;
+      const header = this.at(height)
+      const prev = height > this.startHeight ? this.at(height - 1) : null
       verifyHeader(header, height, prev, (h) => {
         if (h < this.startHeight) {
-          return null;
+          return null
         }
-        return this.at(h);
-      });
+        return this.at(h)
+      })
       if (height === CHECKPOINT.height && header.id !== CHECKPOINT.hash) {
         throw new Error(
           `checkpoint mismatch at ${height}: ${header.id} != ${CHECKPOINT.hash}`
-        );
+        )
       }
     }
   }
@@ -219,67 +219,67 @@ export const headerAt = (
   startHeight = CHECKPOINT.height
 ): BlockHeader => {
   if (chain instanceof HeaderChain) {
-    return chain.at(height);
+    return chain.at(height)
   }
-  return new HeaderChain(chain, startHeight).at(height);
-};
+  return new HeaderChain(chain, startHeight).at(height)
+}
 
 const headersFromRaw = (raw: Buffer, count: number): Buffer => {
-  const got = Math.min(count, Math.floor(raw.length / HEADER_SIZE));
+  const got = Math.min(count, Math.floor(raw.length / HEADER_SIZE))
   if (got <= 0) {
-    throw new Error("server returned no headers");
+    throw new Error("server returned no headers")
   }
-  return raw.subarray(0, got * HEADER_SIZE);
-};
+  return raw.subarray(0, got * HEADER_SIZE)
+}
 
 export class HeaderStore {
-  readonly dir: string;
-  readonly binPath: string;
-  readonly metaPath: string;
+  readonly dir: string
+  readonly binPath: string
+  readonly metaPath: string
 
   constructor(dir: string) {
-    this.dir = dir;
-    this.binPath = path.join(dir, "headers.bin");
-    this.metaPath = path.join(dir, "meta.json");
+    this.dir = dir
+    this.binPath = path.join(dir, "headers.bin")
+    this.metaPath = path.join(dir, "meta.json")
   }
 
   load(): HeaderChain {
     if (!fs.existsSync(this.binPath)) {
-      return new HeaderChain(Buffer.alloc(0), CHECKPOINT.height);
+      return new HeaderChain(Buffer.alloc(0), CHECKPOINT.height)
     }
-    let buf = fs.readFileSync(this.binPath);
-    const first = parseHeader(buf, 0);
+    let buf = fs.readFileSync(this.binPath)
+    const first = parseHeader(buf, 0)
     if (first.id === CHECKPOINT.hash) {
-      return new HeaderChain(buf, CHECKPOINT.height);
+      return new HeaderChain(buf, CHECKPOINT.height)
     }
     if (first.id === GENESIS_HASH) {
-      const offset = CHECKPOINT.height * HEADER_SIZE;
+      const offset = CHECKPOINT.height * HEADER_SIZE
       if (buf.length < offset + HEADER_SIZE) {
         throw new Error(
           "cache looks like a genesis chain but does not reach the checkpoint"
-        );
+        )
       }
-      const cp = parseHeader(buf, offset);
+      const cp = parseHeader(buf, offset)
       if (cp.id !== CHECKPOINT.hash) {
-        throw new Error("genesis cache does not contain the expected checkpoint");
+        throw new Error("genesis cache does not contain the expected checkpoint")
       }
-      buf = Buffer.from(buf.subarray(offset));
-      fs.writeFileSync(this.binPath, buf);
-      return new HeaderChain(buf, CHECKPOINT.height);
+      buf = Buffer.from(buf.subarray(offset))
+      fs.writeFileSync(this.binPath, buf)
+      return new HeaderChain(buf, CHECKPOINT.height)
     }
     throw new Error(
       `unexpected first header ${first.id}; delete ${this.binPath} and re-sync`
-    );
+    )
   }
 
   append(piece: Buffer): void {
-    fs.mkdirSync(this.dir, { recursive: true });
-    fs.appendFileSync(this.binPath, piece);
+    fs.mkdirSync(this.dir, { recursive: true })
+    fs.appendFileSync(this.binPath, piece)
   }
 
   writeMeta(chain: HeaderChain): void {
-    fs.mkdirSync(this.dir, { recursive: true });
-    const tip = chain.count > 0 ? chain.at(chain.tipHeight) : null;
+    fs.mkdirSync(this.dir, { recursive: true })
+    const tip = chain.count > 0 ? chain.at(chain.tipHeight) : null
     fs.writeFileSync(
       this.metaPath,
       JSON.stringify(
@@ -294,13 +294,13 @@ export class HeaderStore {
         null,
         2
       )
-    );
+    )
   }
 }
 
 type DownloadOptions = {
   log: LogFn;
-};
+}
 
 const downloadRange = async (
   client: ElectrumClient,
@@ -309,49 +309,49 @@ const downloadRange = async (
   onHeaders: (piece: Buffer, startHeight: number, got: number) => void,
   { log }: DownloadOptions
 ): Promise<void> => {
-  let height = fromHeight;
-  let chunkSize = 2016;
+  let height = fromHeight
+  let chunkSize = 2016
   while (height <= toHeight) {
-    const remaining = toHeight - height + 1;
+    const remaining = toHeight - height + 1
     const { raw, count, max } = await client.getHeaders(
       height,
       Math.min(chunkSize, remaining)
-    );
-    const piece = headersFromRaw(raw, count);
-    const got = piece.length / HEADER_SIZE;
-    onHeaders(piece, height, got);
-    height += got;
-    chunkSize = max || chunkSize;
+    )
+    const piece = headersFromRaw(raw, count)
+    const got = piece.length / HEADER_SIZE
+    onHeaders(piece, height, got)
+    height += got
+    chunkSize = max || chunkSize
     if (height % (chunkSize * 10) < got || height > toHeight) {
-      log(`verified ${height} / ${toHeight + 1} headers`);
+      log(`verified ${height} / ${toHeight + 1} headers`)
     }
   }
-};
+}
 
 export type CheckpointProof = {
   height: number;
   hash: string;
   time: number;
-};
+}
 
 export const verifyCheckpoint = async (
   clients: ElectrumClient[],
   { log = console.error }: { log?: LogFn } = {}
 ): Promise<CheckpointProof> => {
-  const downloader = clients[0];
+  const downloader = clients[0]
   if (downloader === undefined) {
-    throw new Error("no Electrum servers");
+    throw new Error("no Electrum servers")
   }
   log(
     `walking headers from genesis to checkpoint ${CHECKPOINT.height} via ${downloader.label()}`
-  );
-  log("(this downloads ~70MB once and does not store it)");
+  )
+  log("(this downloads ~70MB once and does not store it)")
 
-  const recent = new Map<number, BlockHeader>();
+  const recent = new Map<number, BlockHeader>()
   const state: { prev: BlockHeader | null; seen: number } = {
     prev: null,
     seen: -1,
-  };
+  }
 
   await downloadRange(
     downloader,
@@ -359,43 +359,43 @@ export const verifyCheckpoint = async (
     CHECKPOINT.height,
     (piece, start, got) => {
       for (let i = 0; i < got; i++) {
-        const height = start + i;
-        const header = parseHeader(piece, i * HEADER_SIZE);
-        verifyHeader(header, height, state.prev, (h) => recent.get(h) ?? null);
-        recent.set(height, header);
-        recent.delete(height - RETARGET_INTERVAL - 1);
-        state.prev = header;
-        state.seen = height;
+        const height = start + i
+        const header = parseHeader(piece, i * HEADER_SIZE)
+        verifyHeader(header, height, state.prev, (h) => recent.get(h) ?? null)
+        recent.set(height, header)
+        recent.delete(height - RETARGET_INTERVAL - 1)
+        state.prev = header
+        state.seen = height
       }
     },
     { log }
-  );
+  )
 
-  const checkpointHeader = state.prev;
+  const checkpointHeader = state.prev
   if (checkpointHeader === null || state.seen !== CHECKPOINT.height) {
-    throw new Error(`stopped at ${state.seen}, expected ${CHECKPOINT.height}`);
+    throw new Error(`stopped at ${state.seen}, expected ${CHECKPOINT.height}`)
   }
   if (checkpointHeader.id !== CHECKPOINT.hash) {
     throw new Error(
       `checkpoint hash mismatch: got ${checkpointHeader.id}, expected ${CHECKPOINT.hash}`
-    );
+    )
   }
 
   for (let i = 1; i < clients.length; i++) {
-    const peer = clients[i];
+    const peer = clients[i]
     if (peer === undefined) {
-      continue;
+      continue
     }
     try {
-      const { raw } = await peer.getHeaders(CHECKPOINT.height, 1);
-      const remote = parseHeader(raw, 0);
+      const { raw } = await peer.getHeaders(CHECKPOINT.height, 1)
+      const remote = parseHeader(raw, 0)
       if (remote.id !== CHECKPOINT.hash) {
-        throw new Error(`${peer.label()} has ${remote.id}`);
+        throw new Error(`${peer.label()} has ${remote.id}`)
       }
-      log(`cross-check OK ${peer.label()} @ ${CHECKPOINT.height}`);
+      log(`cross-check OK ${peer.label()} @ ${CHECKPOINT.height}`)
     } catch (err) {
-      log(`cross-check ${peer.label()}: ${errorMessage(err)}`);
-      throw err;
+      log(`cross-check ${peer.label()}: ${errorMessage(err)}`)
+      throw err
     }
   }
 
@@ -403,82 +403,82 @@ export const verifyCheckpoint = async (
     height: CHECKPOINT.height,
     hash: checkpointHeader.id,
     time: checkpointHeader.time,
-  };
-};
+  }
+}
 
 type TipSample = {
   client: ElectrumClient;
   height: number;
   hex: string;
-};
+}
 
 export const syncHeaders = async (
   store: HeaderStore,
   clients: ElectrumClient[],
   { log = console.error }: { log?: LogFn } = {}
 ): Promise<HeaderChain> => {
-  const tips: TipSample[] = [];
+  const tips: TipSample[] = []
   for (const client of clients) {
     try {
-      const tip = await client.getTip();
-      tips.push({ client, ...tip });
-      log(`tip ${client.label()} height=${tip.height}`);
+      const tip = await client.getTip()
+      tips.push({ client, ...tip })
+      log(`tip ${client.label()} height=${tip.height}`)
     } catch (err) {
-      log(`tip failed ${client.label()}: ${errorMessage(err)}`);
+      log(`tip failed ${client.label()}: ${errorMessage(err)}`)
     }
   }
   if (tips.length === 0) {
-    throw new Error("could not read chain tip from any Electrum server");
+    throw new Error("could not read chain tip from any Electrum server")
   }
-  tips.sort((a, b) => b.height - a.height);
-  const bestTip = tips[0];
+  tips.sort((a, b) => b.height - a.height)
+  const bestTip = tips[0]
   if (bestTip === undefined) {
-    throw new Error("could not read chain tip from any Electrum server");
+    throw new Error("could not read chain tip from any Electrum server")
   }
-  const targetHeight = bestTip.height;
+  const targetHeight = bestTip.height
   if (targetHeight < CHECKPOINT.height) {
-    throw new Error("server tip is below the checkpoint");
+    throw new Error("server tip is below the checkpoint")
   }
 
-  let chain = store.load();
+  let chain = store.load()
   if (chain.count > 0) {
-    log(`cache has ${chain.count} headers from ${chain.startHeight}`);
-    chain.verifyRange(chain.tipHeight, chain.tipHeight);
+    log(`cache has ${chain.count} headers from ${chain.startHeight}`)
+    chain.verifyRange(chain.tipHeight, chain.tipHeight)
   }
 
-  let have = chain.tipHeight + 1;
+  let have = chain.tipHeight + 1
   if (have < CHECKPOINT.height) {
-    have = CHECKPOINT.height;
+    have = CHECKPOINT.height
   }
   if (have > targetHeight + 1) {
-    const keep = (targetHeight - chain.startHeight + 1) * HEADER_SIZE;
+    const keep = (targetHeight - chain.startHeight + 1) * HEADER_SIZE
     chain = new HeaderChain(
       Buffer.from(chain.buf.subarray(0, keep)),
       chain.startHeight
-    );
-    fs.writeFileSync(store.binPath, chain.buf);
-    have = targetHeight + 1;
+    )
+    fs.writeFileSync(store.binPath, chain.buf)
+    have = targetHeight + 1
   }
 
   const downloader =
-    tips.find((t) => t.height >= targetHeight - 2)?.client ?? bestTip.client;
-  log(`downloading headers ${have}..${targetHeight} from ${downloader.label()}`);
+    tips.find((t) => t.height >= targetHeight - 2)?.client ?? bestTip.client
+  log(`downloading headers ${have}..${targetHeight} from ${downloader.label()}`)
 
-  let buf = chain.buf;
-  let len = chain.buf.length;
+  let buf = chain.buf
+  let len = chain.buf.length
   const view = (): HeaderChain =>
-    new HeaderChain(buf.subarray(0, len), CHECKPOINT.height);
+    new HeaderChain(buf.subarray(0, len), CHECKPOINT.height)
   const grow = (piece: Buffer): void => {
     if (len + piece.length > buf.length) {
       const n = Buffer.allocUnsafe(
         Math.max(buf.length * 2, len + piece.length, 1024 * 1024)
-      );
-      buf.copy(n, 0, 0, len);
-      buf = n;
+      )
+      buf.copy(n, 0, 0, len)
+      buf = n
     }
-    piece.copy(buf, len);
-    len += piece.length;
-  };
+    piece.copy(buf, len)
+    len += piece.length
+  }
 
   if (have <= targetHeight) {
     await downloadRange(
@@ -486,41 +486,41 @@ export const syncHeaders = async (
       have,
       targetHeight,
       (piece, start, got) => {
-        grow(piece);
-        view().verifyRange(start, start + got - 1);
-        store.append(piece);
+        grow(piece)
+        view().verifyRange(start, start + got - 1)
+        store.append(piece)
       },
       { log }
-    );
+    )
   }
 
-  chain = new HeaderChain(Buffer.from(view().buf), CHECKPOINT.height);
-  store.writeMeta(chain);
+  chain = new HeaderChain(Buffer.from(view().buf), CHECKPOINT.height)
+  store.writeMeta(chain)
 
   const checkHeights = [
     CHECKPOINT.height,
     Math.floor((CHECKPOINT.height + targetHeight) / 2),
     targetHeight,
-  ].filter((h, i, arr) => arr.indexOf(h) === i);
+  ].filter((h, i, arr) => arr.indexOf(h) === i)
   for (let i = 1; i < tips.length; i++) {
-    const peer = tips[i]?.client;
+    const peer = tips[i]?.client
     if (peer === undefined) {
-      continue;
+      continue
     }
     for (const height of checkHeights) {
       try {
-        const { raw } = await peer.getHeaders(height, 1);
-        const local = chain.at(height);
-        const remote = parseHeader(raw, 0);
+        const { raw } = await peer.getHeaders(height, 1)
+        const local = chain.at(height)
+        const remote = parseHeader(raw, 0)
         if (!local.hash.equals(remote.hash)) {
           throw new Error(
             `${peer.label()} disagrees at height ${height}: ${remote.id} vs ${local.id}`
-          );
+          )
         }
       } catch (err) {
-        log(`cross-check ${peer.label()}@${height}: ${errorMessage(err)}`);
+        log(`cross-check ${peer.label()}@${height}: ${errorMessage(err)}`)
       }
     }
   }
-  return chain;
-};
+  return chain
+}

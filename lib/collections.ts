@@ -1,5 +1,5 @@
 /** Layout metadata from Project Timestamper README collections table. */
-export type WorkHashName = "sha256" | "sha1" | "md5";
+export type WorkHashName = "sha256" | "sha1" | "md5"
 
 export type CollectionMeta = {
   hashName: WorkHashName;
@@ -7,7 +7,7 @@ export type CollectionMeta = {
   prefixHexDigits: number;
   /** If set, gunzip the download before hashing (e.g. NCBI *.fna.gz). */
   gunzipBeforeHash?: boolean;
-};
+}
 
 export const COLLECTIONS: Readonly<Record<string, CollectionMeta>> = {
   gutenberg_books: { hashName: "sha256", hashBytes: 32, prefixHexDigits: 2 },
@@ -29,18 +29,18 @@ export const COLLECTIONS: Readonly<Record<string, CollectionMeta>> = {
     prefixHexDigits: 3,
     gunzipBeforeHash: true,
   },
-};
+}
 
-export const DEFAULT_COLLECTION = "wikiart_works";
+export const DEFAULT_COLLECTION = "wikiart_works"
 
-export const collectionNames = (): string[] => Object.keys(COLLECTIONS);
+export const collectionNames = (): string[] => Object.keys(COLLECTIONS)
 
 export const lookupCollection = (name: string): CollectionMeta => {
-  const meta = COLLECTIONS[name];
+  const meta = COLLECTIONS[name]
   if (meta === undefined) {
     throw new Error(
       `unknown collection "${name}"; known: ${collectionNames().join(", ")}`
-    );
+    )
   }
-  return meta;
-};
+  return meta
+}
