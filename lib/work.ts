@@ -133,9 +133,6 @@ export const resolveCollection = (
 
 export type AttestDigestResult = {
   prefix: string;
-  list: Buffer;
-  listUrl: string;
-  hashCount: number;
   attestation: OtsVerifySuccess;
 };
 
@@ -154,12 +151,18 @@ export const attestDigest = async (opts: {
   }
   const hex = digest.toString("hex");
   const prefix = hex.slice(0, meta.prefixHexDigits).toUpperCase();
+  console.log(`prefix = ${prefix}`);
   const listUrl = `${baseUrl}/${prefix}`;
-  const otsUrl = `${listUrl}.ots`;
   const list = await download(listUrl);
   if (!hashListContains(list, digest, meta.hashBytes)) {
     throw new Error(`digest not found in ${listUrl}`);
   }
+  const hashCount = list.length / meta.hashBytes;
+  console.log(
+    `digest found in ${listUrl} (found among ${hashCount} hashes)`
+  );
+  console.log('verifying OTS proof...');
+  const otsUrl = `${listUrl}.ots`;
   const otsBytes = await download(otsUrl);
   const attestation = await verifyDetachedOts({
     fileBytes: list,
@@ -169,9 +172,6 @@ export const attestDigest = async (opts: {
   });
   return {
     prefix,
-    list,
-    listUrl,
-    hashCount: list.length / meta.hashBytes,
     attestation,
   };
 };

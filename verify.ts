@@ -148,16 +148,12 @@ const cmdWork = async (args: CliArgs): Promise<void> => {
   console.log(`${meta.hashName} = ${hex}`);
 
   console.log(`fetching hash list for prefix...`);
-  const { prefix, listUrl, hashCount, attestation } = await attestDigest({
+  const { prefix, attestation } = await attestDigest({
     digest: digested.digest,
     baseUrl,
     meta,
     cacheDir: args.cache,
   });
-  console.log(`prefix = ${prefix}`);
-  console.log(
-    `digest found in ${listUrl} (found among ${hashCount} hashes)`
-  );
   console.log(
     `Success! The work's ${meta.hashName} is in ${prefix}, and Bitcoin block ${attestation.height} (${attestation.hash}) attests that hash list existed as of ${formatTime(attestation.time)}`
   );
