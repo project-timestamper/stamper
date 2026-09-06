@@ -15,7 +15,7 @@
     "checkpoint": "tsx verify.ts checkpoint",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --test --test-concurrency=1 test/**/*.test.ts"
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.3.0",
